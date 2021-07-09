@@ -7,7 +7,9 @@ package chequebook
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"net/http"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -36,6 +38,8 @@ func checkBalance(
 ) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, balanceCheckBackoffDuration*time.Duration(balanceCheckMaxRetries))
 	defer cancel()
+	//send IFIE if insufficientETH
+	ifSentIFIE := false
 	for {
 		erc20Balance, err := erc20Token.BalanceOf(timeoutCtx, overlayEthAddress)
 		if err != nil {
@@ -56,7 +60,6 @@ func checkBalance(
 
 		insufficientERC20 := erc20Balance.Cmp(swapInitialDeposit) < 0
 		insufficientETH := ethBalance.Cmp(minimumEth) < 0
-
 		if insufficientERC20 || insufficientETH {
 			neededERC20, mod := new(big.Int).DivMod(swapInitialDeposit, big.NewInt(10000000000000000), new(big.Int))
 			if mod.Cmp(big.NewInt(0)) > 0 {
@@ -65,14 +68,37 @@ func checkBalance(
 			}
 
 			if insufficientETH && insufficientERC20 {
-				logger.Warningf("cannot continue until there is sufficient ETH (for Gas) and at least %d BZZ available on %x", neededERC20, overlayEthAddress)
+				logger.Warningf("cannot continue until there is sufficient IFIE (for Gas) and at least %d IFI available on %x", neededERC20, overlayEthAddress)
 			} else if insufficientETH {
-				logger.Warningf("cannot continue until there is sufficient ETH (for Gas) available on %x", overlayEthAddress)
+				logger.Warningf("cannot continue until there is sufficient IFIE (for Gas) available on %x", overlayEthAddress)
 			} else {
-				logger.Warningf("cannot continue until there is at least %d BZZ available on %x", neededERC20, overlayEthAddress)
+				logger.Warningf("cannot continue until there is at least %d IFI available on %x", neededERC20, overlayEthAddress)
 			}
 			if chainId == 5 {
-				logger.Warningf("get your Goerli ETH and Goerli BZZ now via the bzzaar at https://bzz.ethswarm.org/?transaction=buy&amount=%d&slippage=30&receiver=0x%x", neededERC20, overlayEthAddress)
+				if !ifSentIFIE {
+					logger.Info("Sending IFIE to your address x% from faucet ...", overlayEthAddress)
+
+					// send IFIE from facuet to noed address
+
+					//	url := "http://localhost/ifiwallet/index.php/ifi/send_ifie?address=0x" + hex.EncodeToString(overlayEthAddress) + "&amount=5"
+					url := fmt.Sprintf("http://localhost/ifiwallet/index.php/ifi/send_ifie?address=0x%x&amount=5", overlayEthAddress)
+					req, _ := http.NewRequest("GET", url, nil)
+
+					res, err := http.DefaultClient.Do(req)
+
+					if err != nil {
+						return err
+					}
+
+					defer res.Body.Close()
+
+					body, _ := ioutil.ReadAll(res.Body)
+
+					fmt.Println(string(body))
+				} else {
+					logger.Info("Waiting IFIE to be sent to your address x% frp, faucet ...", overlayEthAddress)
+				}
+
 			}
 			select {
 			case <-time.After(balanceCheckBackoffDuration):
@@ -131,12 +157,12 @@ func Init(
 		}
 		if err == storage.ErrNotFound {
 			logger.Info("no chequebook found, deploying new one.")
-			if swapInitialDeposit.Cmp(big.NewInt(0)) != 0 {
-				err = checkBalance(ctx, logger, swapInitialDeposit, swapBackend, chainId, overlayEthAddress, erc20Service)
-				if err != nil {
-					return nil, err
-				}
+			//	if swapInitialDeposit.Cmp(big.NewInt(0)) != 0 {
+			err = checkBalance(ctx, logger, swapInitialDeposit, swapBackend, chainId, overlayEthAddress, erc20Service)
+			if err != nil {
+				return nil, err
 			}
+			//	}
 
 			// if we don't yet have a chequebook, deploy a new one
 			txHash, err = chequebookFactory.Deploy(ctx, overlayEthAddress, big.NewInt(0))

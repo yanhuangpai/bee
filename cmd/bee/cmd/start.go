@@ -93,19 +93,10 @@ func (c *command) initStartCmd() (err error) {
 			}
 
 			beeASCII := `
-Welcome to the Swarm.... Bzzz Bzzzz Bzzzz
-                \     /
-            \    o ^ o    /
-              \ (     ) /
-   ____________(%%%%%%%)____________
-  (     /   /  )%%%%%%%(  \   \     )
-  (___/___/__/           \__\___\___)
-     (     /  /(%%%%%%%)\  \     )
-      (__/___/ (%%%%%%%) \___\__)
-              /(       )\
-            /   (%%%%%)   \
-                 (%%%)
-                   !                   `
+Welcome to the Infinity.... 
+<*)))))><
+<*)))))><
+<*)))))>< `
 
 			fmt.Println(beeASCII)
 			logger.Infof("version: %v", bee.Version)
