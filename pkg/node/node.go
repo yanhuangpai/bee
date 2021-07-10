@@ -49,6 +49,7 @@ import (
 	"github.com/ethersphere/bee/pkg/settlement/pseudosettle"
 	"github.com/ethersphere/bee/pkg/settlement/swap"
 	"github.com/ethersphere/bee/pkg/settlement/swap/chequebook"
+	"github.com/ethersphere/bee/pkg/settlement/swap/cpuaward"
 	"github.com/ethersphere/bee/pkg/settlement/swap/transaction"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -115,14 +116,14 @@ type Options struct {
 	SwapEnable               bool
 }
 
-func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (b *Bee, err error) {
+func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (b *Bee, cpuawardService cpuaward.Service, err error) {
 	tracer, tracerCloser, err := tracing.NewTracer(&tracing.Options{
 		Enabled:     o.TracingEnabled,
 		Endpoint:    o.TracingEndpoint,
 		ServiceName: o.TracingServiceName,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("tracer: %w", err)
+		return nil, nil, fmt.Errorf("tracer: %w", err)
 	}
 
 	p2pCtx, p2pCancel := context.WithCancel(context.Background())
@@ -145,14 +146,14 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	if o.DebugAPIAddr != "" {
 		overlayEthAddress, err := signer.EthereumAddress()
 		if err != nil {
-			return nil, fmt.Errorf("eth address: %w", err)
+			return nil, nil, fmt.Errorf("eth address: %w", err)
 		}
 		// set up basic debug api endpoints for debugging and /health endpoint
 		debugAPIService = debugapi.New(swarmAddress, publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, tracer, o.CORSAllowedOrigins)
 
 		debugAPIListener, err := net.Listen("tcp", o.DebugAPIAddr)
 		if err != nil {
-			return nil, fmt.Errorf("debug api listener: %w", err)
+			return nil, nil, fmt.Errorf("debug api listener: %w", err)
 		}
 
 		debugAPIServer := &http.Server{
@@ -176,13 +177,13 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 
 	stateStore, err := InitStateStore(logger, o.DataDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	b.stateStoreCloser = stateStore
 
 	err = CheckOverlayWithStore(swarmAddress, stateStore)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	addressbook := addressbook.New(stateStore)
@@ -205,7 +206,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 			signer,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		b.ethClientCloser = swapBackend.Close
 
@@ -217,11 +218,11 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 			o.SwapFactoryAddress,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if err = chequebookFactory.VerifyBytecode(p2pCtx); err != nil {
-			return nil, fmt.Errorf("factory fail: %w", err)
+			return nil, nil, fmt.Errorf("factory fail: %w", err)
 		}
 
 		chequebookService, err = InitChequebookService(
@@ -237,8 +238,13 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 			o.SwapInitialDeposit,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+
+		cpuawardService, err = InitCPUAwardService(
+			overlayEthAddress,
+			transactionService,
+		)
 
 		chequeStore, cashoutService = initChequeStoreCashout(
 			stateStore,
@@ -248,6 +254,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 			overlayEthAddress,
 			transactionService,
 		)
+
 	}
 
 	p2ps, err := libp2p.New(p2pCtx, signer, networkID, swarmAddress, addr, addressbook, stateStore, logger, tracer, libp2p.Options{
@@ -259,7 +266,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		WelcomeMessage: o.WelcomeMessage,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("p2p service: %w", err)
+		return nil, nil, fmt.Errorf("p2p service: %w", err)
 	}
 	b.p2pService = p2ps
 
@@ -283,12 +290,12 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	pingPong := pingpong.New(p2ps, logger, tracer)
 
 	if err = p2ps.AddProtocol(pingPong.Protocol()); err != nil {
-		return nil, fmt.Errorf("pingpong service: %w", err)
+		return nil, nil, fmt.Errorf("pingpong service: %w", err)
 	}
 
 	hive := hive.New(p2ps, addressbook, networkID, logger)
 	if err = p2ps.AddProtocol(hive.Protocol()); err != nil {
-		return nil, fmt.Errorf("hive service: %w", err)
+		return nil, nil, fmt.Errorf("hive service: %w", err)
 	}
 
 	var bootnodes []ma.Multiaddr
@@ -322,33 +329,33 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 			cashoutService,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		settlement = swapService
 	} else {
 		pseudosettleService := pseudosettle.New(p2ps, logger, stateStore)
 		if err = p2ps.AddProtocol(pseudosettleService.Protocol()); err != nil {
-			return nil, fmt.Errorf("pseudosettle service: %w", err)
+			return nil, nil, fmt.Errorf("pseudosettle service: %w", err)
 		}
 		settlement = pseudosettleService
 	}
 
 	paymentThreshold, ok := new(big.Int).SetString(o.PaymentThreshold, 10)
 	if !ok {
-		return nil, fmt.Errorf("invalid payment threshold: %s", paymentThreshold)
+		return nil, nil, fmt.Errorf("invalid payment threshold: %s", paymentThreshold)
 	}
 	pricing := pricing.New(p2ps, logger, paymentThreshold)
 	if err = p2ps.AddProtocol(pricing.Protocol()); err != nil {
-		return nil, fmt.Errorf("pricing service: %w", err)
+		return nil, nil, fmt.Errorf("pricing service: %w", err)
 	}
 
 	paymentTolerance, ok := new(big.Int).SetString(o.PaymentTolerance, 10)
 	if !ok {
-		return nil, fmt.Errorf("invalid payment tolerance: %s", paymentTolerance)
+		return nil, nil, fmt.Errorf("invalid payment tolerance: %s", paymentTolerance)
 	}
 	paymentEarly, ok := new(big.Int).SetString(o.PaymentEarly, 10)
 	if !ok {
-		return nil, fmt.Errorf("invalid payment early: %s", paymentEarly)
+		return nil, nil, fmt.Errorf("invalid payment early: %s", paymentEarly)
 	}
 	acc, err := accounting.NewAccounting(
 		paymentThreshold,
@@ -360,7 +367,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		pricing,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("accounting: %w", err)
+		return nil, nil, fmt.Errorf("accounting: %w", err)
 	}
 
 	settlement.SetNotifyPaymentFunc(acc.AsyncNotifyPayment)
@@ -372,7 +379,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	p2ps.SetPickyNotifier(kad)
 	addrs, err := p2ps.Addresses()
 	if err != nil {
-		return nil, fmt.Errorf("get server addresses: %w", err)
+		return nil, nil, fmt.Errorf("get server addresses: %w", err)
 	}
 
 	for _, addr := range addrs {
@@ -393,7 +400,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	}
 	storer, err := localstore.New(path, swarmAddress.Bytes(), lo, logger)
 	if err != nil {
-		return nil, fmt.Errorf("localstore: %w", err)
+		return nil, nil, fmt.Errorf("localstore: %w", err)
 	}
 	b.localstoreCloser = storer
 
@@ -402,7 +409,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	b.tagsCloser = tagService
 
 	if err = p2ps.AddProtocol(retrieve.Protocol()); err != nil {
-		return nil, fmt.Errorf("retrieval service: %w", err)
+		return nil, nil, fmt.Errorf("retrieval service: %w", err)
 	}
 
 	pssService := pss.New(pssPrivateKey, logger)
@@ -425,7 +432,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	pssService.SetPushSyncer(pushSyncProtocol)
 
 	if err = p2ps.AddProtocol(pushSyncProtocol.Protocol()); err != nil {
-		return nil, fmt.Errorf("pushsync service: %w", err)
+		return nil, nil, fmt.Errorf("pushsync service: %w", err)
 	}
 
 	if o.GlobalPinningEnabled {
@@ -443,7 +450,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	b.pullSyncCloser = pullSync
 
 	if err = p2ps.AddProtocol(pullSync.Protocol()); err != nil {
-		return nil, fmt.Errorf("pullsync protocol: %w", err)
+		return nil, nil, fmt.Errorf("pullsync protocol: %w", err)
 	}
 
 	puller := puller.New(stateStore, kad, pullSync, logger, puller.Options{})
@@ -467,7 +474,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		})
 		apiListener, err := net.Listen("tcp", o.APIAddr)
 		if err != nil {
-			return nil, fmt.Errorf("api listener: %w", err)
+			return nil, nil, fmt.Errorf("api listener: %w", err)
 		}
 
 		apiServer := &http.Server{
@@ -522,11 +529,11 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	}
 
 	if err := kad.Start(p2pCtx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p2ps.Ready()
 
-	return b, nil
+	return b, cpuawardService, nil
 }
 
 func (b *Bee) Shutdown(ctx context.Context) error {

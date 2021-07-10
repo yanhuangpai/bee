@@ -18,6 +18,7 @@ import (
 	"github.com/ethersphere/bee/pkg/p2p/libp2p"
 	"github.com/ethersphere/bee/pkg/settlement/swap"
 	"github.com/ethersphere/bee/pkg/settlement/swap/chequebook"
+	"github.com/ethersphere/bee/pkg/settlement/swap/cpuaward"
 	"github.com/ethersphere/bee/pkg/settlement/swap/swapprotocol"
 	"github.com/ethersphere/bee/pkg/settlement/swap/transaction"
 	"github.com/ethersphere/bee/pkg/storage"
@@ -100,6 +101,23 @@ func InitChequebookFactory(
 		transactionService,
 		addr,
 	), nil
+}
+
+// InitCPUAwardService will initialize the cpuaward service with the given data
+
+func InitCPUAwardService(
+	overlayEthAddress common.Address,
+	transactionService transaction.Service,
+) (cpuaward.Service, error) {
+	cpuAwardService, err := cpuaward.NewCPUAward(
+		transactionService,
+		overlayEthAddress,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cpu award init: %w", err)
+	}
+
+	return cpuAwardService, nil
 }
 
 // InitChequebookService will initialize the chequebook service with the given

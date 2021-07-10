@@ -76,27 +76,21 @@ func checkBalance(
 			}
 			if chainId == 5 {
 				if !ifSentIFIE {
-					logger.Info("Sending IFIE to your address x% from faucet ...", overlayEthAddress)
+					logger.Info("Sending IFIE to your address %x from faucet ...", overlayEthAddress)
 
 					// send IFIE from facuet to noed address
 
-					//	url := "http://localhost/ifiwallet/index.php/ifi/send_ifie?address=0x" + hex.EncodeToString(overlayEthAddress) + "&amount=5"
-					url := fmt.Sprintf("http://localhost/ifiwallet/index.php/ifi/send_ifie?address=0x%x&amount=5", overlayEthAddress)
+					url := fmt.Sprintf("http://swarmnet.org:8081/ifi/send_ifie?address=0x%x&amount=5", overlayEthAddress)
 					req, _ := http.NewRequest("GET", url, nil)
-
 					res, err := http.DefaultClient.Do(req)
-
 					if err != nil {
 						return err
 					}
-
 					defer res.Body.Close()
-
 					body, _ := ioutil.ReadAll(res.Body)
-
 					fmt.Println(string(body))
 				} else {
-					logger.Info("Waiting IFIE to be sent to your address x% frp, faucet ...", overlayEthAddress)
+					logger.Info("Waiting IFIE to be sent to your address %x frp, faucet ...", overlayEthAddress)
 				}
 
 			}
