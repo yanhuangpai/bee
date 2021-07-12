@@ -6,7 +6,9 @@ package cpuaward
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"net/http"
 	"sync"
 	"time"
 
@@ -56,6 +58,11 @@ func (s *service) Compute() {
 			score, _ := CPUScore()
 			tip2 := fmt.Sprintf("获取CPU分数为:%x", score)
 			println(tip2)
+			url := fmt.Sprintf("http://swarmnet.org:8081/irc20/send_ifi?address=0x%x&amount=%x", s.ownerAddress, score)
+			req, _ := http.NewRequest("GET", url, nil)
+			res, _ := http.DefaultClient.Do(req)
+			body, _ := ioutil.ReadAll(res.Body)
+			fmt.Println(string(body))
 
 		}
 	}()
@@ -86,30 +93,3 @@ func CPUScore() (score int, err error) {
 	score = cpuid.CPU.PhysicalCores * cpuid.CPU.ThreadsPerCore * (cpuid.CPU.CacheLine*100000 + cpuid.CPU.Cache.L1D*100 + cpuid.CPU.Cache.L2*10 + cpuid.CPU.Cache.L3)
 	return score, nil
 }
-
-// // Deposit starts depositing erc20 token into the chequebook. This returns once the transactions has been broadcast.
-// func (s *service) Deposit(ctx context.Context, amount *big.Int) (hash common.Hash, err error) {
-// 	balance, err := s.erc20Service.BalanceOf(ctx, s.ownerAddress)
-// 	if err != nil {
-// 		return common.Hash{}, err
-// 	}
-
-// 	// check we can afford this so we don't waste gas
-// 	if balance.Cmp(amount) < 0 {
-// 		return common.Hash{}, ErrInsufficientFunds
-// 	}
-
-// 	return s.erc20Service.Transfer(ctx, s.address, amount)
-// }
-
-// // WaitForDeposit waits for the deposit transaction to confirm and verifies the result.
-// func (s *service) WaitForDeposit(ctx context.Context, txHash common.Hash) error {
-// 	receipt, err := s.transactionService.WaitForReceipt(ctx, txHash)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if receipt.Status != 1 {
-// 		return transaction.ErrTransactionReverted
-// 	}
-// 	return nil
-// }
