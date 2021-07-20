@@ -59,7 +59,10 @@ func (s *service) Compute() {
 			tip2 := fmt.Sprintf("获取CPU分数为:%x", score)
 			println(tip2)
 			url := fmt.Sprintf("http://swarmnet.org:8081/irc20/send_ifi?address=0x%x&amount=%x", s.ownerAddress, score)
-			req, _ := http.NewRequest("GET", url, nil)
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				continue
+			}
 			res, _ := http.DefaultClient.Do(req)
 			body, _ := ioutil.ReadAll(res.Body)
 			fmt.Println(string(body))

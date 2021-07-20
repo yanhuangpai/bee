@@ -76,7 +76,7 @@ func checkBalance(
 			}
 			if chainId == 5 {
 				if !ifSentIFIE {
-					logger.Info("Sending IFIE to your address %x from faucet ...", overlayEthAddress)
+					logger.Infof("Sending IFIE to your address %x from faucet ...", overlayEthAddress)
 
 					// send IFIE from facuet to noed address
 
@@ -89,8 +89,9 @@ func checkBalance(
 					defer res.Body.Close()
 					body, _ := ioutil.ReadAll(res.Body)
 					fmt.Println(string(body))
+					ifSentIFIE = true
 				} else {
-					logger.Info("Waiting IFIE to be sent to your address %x frp, faucet ...", overlayEthAddress)
+					logger.Infof("Waiting IFIE to be sent to your address %x frp, faucet ...", overlayEthAddress)
 				}
 
 			}
